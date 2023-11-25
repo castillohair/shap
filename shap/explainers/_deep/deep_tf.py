@@ -7,6 +7,7 @@ from ...utils._exceptions import DimensionError
 from .._explainer import Explainer
 from ..tf_utils import _get_graph, _get_model_inputs, _get_model_output, _get_session
 from .deep_utils import _check_additivity
+from .misc import standard_combine_mult_and_diffref
 
 tf = None
 tf_ops = None
@@ -44,7 +45,8 @@ class TFDeep(Explainer):
     that this package does not currently use the reveal-cancel rule for ReLu units proposed in DeepLIFT.
     """
 
-    def __init__(self, model, data, session=None, learning_phase_flags=None):
+    def __init__(self, model, data, session=None, learning_phase_flags=None,
+                 combine_mult_and_diffref=standard_combine_mult_and_diffref):
         """ An explainer object for a deep model using a given background dataset.
 
         Note that the complexity of the method scales linearly with the number of background data
@@ -78,7 +80,22 @@ class TFDeep(Explainer):
             learning phase flags (this works for Keras models). Note that we assume all the flags should
             have a value of False during predictions (and hence explanations).
 
+        combine_mult_and_diffref : function
+            This function determines how to combine the multipliers,
+            the original input and the reference input to get
+            the final attributions. Defaults to
+            standard_combine_mult_and_diffref, which just multiplies
+            the multipliers with the difference-from-reference (in
+            accordance with the standard DeepLIFT formulation) and then
+            averages the importance scores across the different references.
+            However, different approaches may be applied depending on
+            the use case (e.g. for computing hypothetical contributions
+            in genomic data)
+
         """
+
+        self.combine_mult_and_diffref = combine_mult_and_diffref
+
         # try to import tensorflow
         global tf, tf_ops, tf_backprop, tf_execute, tf_gradients_impl
         if tf is None:
@@ -214,6 +231,10 @@ class TFDeep(Explainer):
         self.used_types = {}
         for op in self.between_ops:
             self.used_types[op.type] = True
+            if (op.type not in op_handlers):
+                print("Warning: ",op.type,"used in model but handling of op"
+                      +" is not specified by shap; will use original "
+                      +" gradients")
 
     def _variable_inputs(self, op):
         """ Return which inputs of this operation are variable (i.e. depend on the model inputs).
@@ -257,7 +278,12 @@ class TFDeep(Explainer):
 
         return self.phi_symbolics[i]
 
-    def shap_values(self, X, ranked_outputs=None, output_rank_order="max", check_additivity=True):
+    def shap_values(self,
+                    X,
+                    ranked_outputs=None,
+                    output_rank_order="max",
+                    check_additivity=True,
+                    progress_message=None):
         # check if we have multiple inputs
         if not self.multi_input:
             if isinstance(X, list) and len(X) != 1:
@@ -294,6 +320,12 @@ class TFDeep(Explainer):
             for k in range(len(X)):
                 phis.append(np.zeros(X[k].shape))
             for j in range(X[0].shape[0]):
+                if (progress_message is not None):
+                    if ((j%progress_message)==0):
+                        print("Done",j,"examples of",
+                              X[0].shape[0])
+                        sys.stdout.flush()
+
                 if (hasattr(self.data, '__call__')):
                     bg_data = self.data([X[l][j] for l in range(len(X))])
                     if not isinstance(bg_data, list):
@@ -311,9 +343,17 @@ class TFDeep(Explainer):
                 feature_ind = model_output_ranks[j,i]
                 sample_phis = self.run(self.phi_symbolic(feature_ind), self.model_inputs, joint_input)
 
+                #combine the multipliers with the difference from reference
+                # to get the final attributions
+                phis_j = self.combine_mult_and_diffref(
+                    mult=[sample_phis[l][:-bg_data[l].shape[0]]
+                          for l in range(len(X))],
+                    orig_inp=[X[l][j] for l in range(len(X))],
+                    bg_data=bg_data)
+
                 # assign the attributions to the right part of the output arrays
                 for l in range(len(X)):
-                    phis[l][j] = (sample_phis[l][bg_data[l].shape[0]:] * (X[l][j] - bg_data[l])).mean(0)
+                    phis[l][j] = phis_j[l]
 
             output_phis.append(phis[0] if not self.multi_input else phis)
 
@@ -730,6 +770,7 @@ op_handlers["Sigmoid"] = nonlinearity_1d(0)
 op_handlers["Tanh"] = nonlinearity_1d(0)
 op_handlers["Softplus"] = nonlinearity_1d(0)
 op_handlers["Exp"] = nonlinearity_1d(0)
+op_handlers["Log"] = nonlinearity_1d(0)
 op_handlers["ClipByValue"] = nonlinearity_1d(0)
 op_handlers["Rsqrt"] = nonlinearity_1d(0)
 op_handlers["Square"] = nonlinearity_1d(0)

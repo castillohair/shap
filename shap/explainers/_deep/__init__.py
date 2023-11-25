@@ -1,6 +1,7 @@
 from .._explainer import Explainer
 from .deep_pytorch import PyTorchDeep
 from .deep_tf import TFDeep
+from .misc import standard_combine_mult_and_diffref
 
 
 class DeepExplainer(Explainer):
@@ -19,7 +20,9 @@ class DeepExplainer(Explainer):
     See :ref:`Deep Explainer Examples <deep_explainer_examples>`
     """
 
-    def __init__(self, model, data, session=None, learning_phase_flags=None):
+    def __init__(self, model, data,
+                 session=None, learning_phase_flags=None,
+                 combine_mult_and_diffref=standard_combine_mult_and_diffref):
         """ An explainer object for a differentiable model using a given background dataset.
 
         Note that the complexity of the method scales linearly with the number of background data
@@ -64,6 +67,19 @@ class DeepExplainer(Explainer):
             batch norm or dropout. If None is passed then we look for tensors in the graph that look like
             learning phase flags (this works for Keras models). Note that we assume all the flags should
             have a value of False during predictions (and hence explanations).
+
+        combine_mult_and_diffref : function
+            This function determines how to combine the multipliers,
+            the original input and the reference input to get
+            the final attributions. Defaults to
+            standard_combine_mult_and_diffref, which just multiplies
+            the multipliers with the difference-from-reference (in
+            accordance with the standard DeepLIFT formulation) and then
+            averages the importance scores across the different references.
+            However, different approaches may be applied depending on
+            the use case (e.g. for computing hypothetical contributions
+            in genomic data)
+
         """
         # first, we need to find the framework
         if type(model) is tuple:
@@ -81,14 +97,22 @@ class DeepExplainer(Explainer):
                 framework = 'tensorflow'
 
         if framework == 'tensorflow':
-            self.explainer = TFDeep(model, data, session, learning_phase_flags)
+            self.explainer = TFDeep(model=model, data=data,
+                session=session, learning_phase_flags=learning_phase_flags,
+                combine_mult_and_diffref=combine_mult_and_diffref)
         elif framework == 'pytorch':
-            self.explainer = PyTorchDeep(model, data)
+            self.explainer = PyTorchDeep(model=model, data=data,
+                combine_mult_and_diffref=combine_mult_and_diffref)
 
         self.expected_value = self.explainer.expected_value
         self.explainer.framework = framework
 
-    def shap_values(self, X, ranked_outputs=None, output_rank_order='max', check_additivity=True):
+    def shap_values(self,
+                    X,
+                    ranked_outputs=None,
+                    output_rank_order='max',
+                    check_additivity=True,
+                    progress_message=None):
         """ Return approximate SHAP values for the model applied to the data given by X.
 
         Parameters
@@ -122,4 +146,10 @@ class DeepExplainer(Explainer):
             ranked_outputs, and indexes is a matrix that indicates for each sample which output indexes
             were chosen as "top".
         """
-        return self.explainer.shap_values(X, ranked_outputs, output_rank_order, check_additivity=check_additivity)
+        return self.explainer.shap_values(
+            X,
+            ranked_outputs,
+            output_rank_order,
+            check_additivity=check_additivity,
+            progress_message=progress_message,
+        )
