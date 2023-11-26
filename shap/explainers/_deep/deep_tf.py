@@ -1,3 +1,4 @@
+import sys
 import warnings
 
 import numpy as np
@@ -322,8 +323,7 @@ class TFDeep(Explainer):
             for j in range(X[0].shape[0]):
                 if (progress_message is not None):
                     if ((j%progress_message)==0):
-                        print("Done",j,"examples of",
-                              X[0].shape[0])
+                        print("Output",i,"of",model_output_ranks.shape[1],", done",j,"examples of",X[0].shape[0])
                         sys.stdout.flush()
 
                 if (hasattr(self.data, '__call__')):
