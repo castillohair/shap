@@ -1,4 +1,5 @@
 import sys
+import time
 import warnings
 
 import numpy as np
@@ -315,6 +316,8 @@ class TFDeep(Explainer):
             model_output_ranks = np.tile(np.arange(len(self.phi_symbolics)), (X[0].shape[0], 1))
 
         # compute the attributions
+        if progress_message:
+            ts = time.time()
         output_phis = []
         for i in range(model_output_ranks.shape[1]):
             phis = []
@@ -323,7 +326,9 @@ class TFDeep(Explainer):
             for j in range(X[0].shape[0]):
                 if (progress_message is not None):
                     if ((j%progress_message)==0):
-                        print("Output",i,"of",model_output_ranks.shape[1],", done",j,"examples of",X[0].shape[0])
+                        print("Output {}/{}, sample {}/{}, {}s elapsed".format(
+                            i+1, model_output_ranks.shape[1], j+1, X[0].shape[0], int(time.time()-ts),
+                        ))
                         sys.stdout.flush()
 
                 if (hasattr(self.data, '__call__')):
